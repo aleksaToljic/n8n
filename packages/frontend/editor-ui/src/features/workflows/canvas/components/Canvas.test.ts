@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createEvent, fireEvent, waitFor, within } from '@testing-library/vue';
-import { computed } from 'vue';
+import { computed, nextTick } from 'vue';
 import { createComponentRenderer } from '@/__tests__/render';
 import Canvas from './Canvas.vue';
 import { createPinia, setActivePinia } from 'pinia';
@@ -1652,6 +1652,74 @@ describe('Canvas', () => {
 			await fireEvent.mouseLeave(getByTestId('canvas-minimap'));
 			vi.advanceTimersByTime(minimapVisibilityDelay + minimapTransitionDuration);
 			await waitFor(() => expect(getByTestId('canvas-minimap')).not.toBeVisible());
+		});
+	});
+
+	function getPanningState() {
+		const { panOnDrag, selectionKeyCode } = useVueFlow(canvasId);
+		return { panOnDrag: panOnDrag.value, selectionKeyCode: selectionKeyCode.value };
+	}
+
+	describe('panning mode on desktop', () => {
+		const selectionMode = { panOnDrag: [1], selectionKeyCode: true };
+		const panningMode = { panOnDrag: [0, 1], selectionKeyCode: null };
+
+		async function renderDesktopCanvas() {
+			renderComponent();
+			await waitFor(() => expect(getPanningState()).toEqual(selectionMode));
+		}
+
+		it.each([
+			{ keyName: 'Space', key: ' ' },
+			{ keyName: 'Control', key: 'Control' },
+		])('should pan with the left mouse button only while $keyName is held', async ({ key }) => {
+			await renderDesktopCanvas();
+
+			await fireEvent.keyDown(document, { key, view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(panningMode);
+
+			await fireEvent.keyUp(document, { key, view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(selectionMode);
+		});
+
+		it('should use Meta as the control key on macOS', async () => {
+			vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(
+				'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+			);
+			await renderDesktopCanvas();
+
+			await fireEvent.keyDown(document, { key: 'Meta', view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(panningMode);
+
+			await fireEvent.keyUp(document, { key: 'Meta', view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(selectionMode);
+		});
+
+		it('should return to selection mode when the window loses focus', async () => {
+			await renderDesktopCanvas();
+			await fireEvent.keyDown(document, { key: ' ', view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(panningMode);
+
+			await fireEvent.blur(window);
+			await nextTick();
+			expect(getPanningState()).toEqual(selectionMode);
+		});
+
+		it('should ignore keys other than Space and the control key', async () => {
+			await renderDesktopCanvas();
+
+			await fireEvent.keyDown(document, { key: 'a', view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(selectionMode);
+
+			await fireEvent.keyUp(document, { key: 'a', view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(selectionMode);
 		});
 	});
 
