@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createEvent, fireEvent, waitFor, within } from '@testing-library/vue';
-import { computed } from 'vue';
+import { computed, nextTick } from 'vue';
 import { createComponentRenderer } from '@/__tests__/render';
 import Canvas from './Canvas.vue';
 import { createPinia, setActivePinia } from 'pinia';
@@ -1652,6 +1652,159 @@ describe('Canvas', () => {
 			await fireEvent.mouseLeave(getByTestId('canvas-minimap'));
 			vi.advanceTimersByTime(minimapVisibilityDelay + minimapTransitionDuration);
 			await waitFor(() => expect(getByTestId('canvas-minimap')).not.toBeVisible());
+		});
+	});
+
+	function getPanningState() {
+		const { panOnDrag, selectionKeyCode } = useVueFlow(canvasId);
+		return { panOnDrag: panOnDrag.value, selectionKeyCode: selectionKeyCode.value };
+	}
+
+	describe('panning mode on desktop', () => {
+		const selectionMode = { panOnDrag: [1], selectionKeyCode: true };
+		const panningMode = { panOnDrag: [0, 1], selectionKeyCode: null };
+
+		async function renderDesktopCanvas() {
+			renderComponent();
+			await waitFor(() => expect(getPanningState()).toEqual(selectionMode));
+		}
+
+		it.each([
+			{ keyName: 'Space', key: ' ' },
+			{ keyName: 'Control', key: 'Control' },
+		])('should pan with the left mouse button only while $keyName is held', async ({ key }) => {
+			await renderDesktopCanvas();
+
+			await fireEvent.keyDown(document, { key, view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(panningMode);
+
+			await fireEvent.keyUp(document, { key, view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(selectionMode);
+		});
+
+		it('should use Meta as the control key on macOS', async () => {
+			vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(
+				'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+			);
+			await renderDesktopCanvas();
+
+			await fireEvent.keyDown(document, { key: 'Meta', view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(panningMode);
+
+			await fireEvent.keyUp(document, { key: 'Meta', view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(selectionMode);
+		});
+
+		it('should return to selection mode when the window loses focus', async () => {
+			await renderDesktopCanvas();
+			await fireEvent.keyDown(document, { key: ' ', view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(panningMode);
+
+			await fireEvent.blur(window);
+			await nextTick();
+			expect(getPanningState()).toEqual(selectionMode);
+		});
+
+		it('should ignore keys other than Space and the control key', async () => {
+			await renderDesktopCanvas();
+
+			await fireEvent.keyDown(document, { key: 'a', view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(selectionMode);
+
+			await fireEvent.keyUp(document, { key: 'a', view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(selectionMode);
+		});
+	});
+
+	describe.each([
+		{
+			device: 'iPad',
+			userAgent:
+				'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+		},
+		{
+			device: 'Android',
+			userAgent:
+				'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+		},
+	])('touch panning on a mobile device ($device)', ({ userAgent }) => {
+		const touchPanningMode = { panOnDrag: true, selectionKeyCode: 'Shift' };
+
+		beforeEach(() => {
+			vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(userAgent);
+		});
+
+		async function renderTouchCanvas() {
+			const rendered = renderComponent();
+			// A new VueFlow store has the same values as the touch panning mode.
+			// Only the mounted mobile canvas sets this one, so it proves which store the test reads.
+			await waitFor(() => expect(useVueFlow(canvasId).panActivationKeyCode.value).toBe(true));
+			expect(getPanningState()).toEqual(touchPanningMode);
+			return rendered;
+		}
+
+		it.each([
+			{ keyName: 'letter', key: 'a' },
+			{ keyName: 'Space', key: ' ' },
+		])('should keep touch panning after a $keyName key press', async ({ key }) => {
+			await renderTouchCanvas();
+
+			await fireEvent.keyDown(document, { key, view: window });
+			await fireEvent.keyUp(document, { key, view: window });
+			await nextTick();
+
+			expect(getPanningState()).toEqual(touchPanningMode);
+		});
+
+		it('should keep touch panning while a key is held down', async () => {
+			await renderTouchCanvas();
+
+			await fireEvent.keyDown(document, { key: 'a', view: window });
+			await nextTick();
+
+			expect(getPanningState()).toEqual(touchPanningMode);
+		});
+
+		it('should keep touch panning after the window loses focus', async () => {
+			await renderTouchCanvas();
+
+			await fireEvent.blur(window);
+			await nextTick();
+
+			expect(getPanningState()).toEqual(touchPanningMode);
+		});
+
+		it('should keep touch panning after typing in a text field', async () => {
+			const { container } = await renderTouchCanvas();
+			const input = document.createElement('input');
+			container.appendChild(input);
+
+			await fireEvent.keyDown(input, { key: 'a', view: window });
+			await fireEvent.keyUp(input, { key: 'a', view: window });
+			await nextTick();
+
+			expect(getPanningState()).toEqual(touchPanningMode);
+		});
+
+		it('should select while Shift is held on a hardware keyboard', async () => {
+			const { container } = await renderTouchCanvas();
+			const pane = container.querySelector('.vue-flow__pane');
+
+			await fireEvent.keyDown(document, { key: 'Shift', code: 'ShiftLeft', view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(touchPanningMode);
+			expect(pane).toHaveClass('selection');
+
+			await fireEvent.keyUp(document, { key: 'Shift', code: 'ShiftLeft', view: window });
+			await nextTick();
+			expect(pane).not.toHaveClass('selection');
 		});
 	});
 
