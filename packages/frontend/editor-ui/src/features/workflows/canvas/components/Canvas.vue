@@ -329,10 +329,13 @@ const classes = computed(() => ({
  * Panning and Selection key bindings
  */
 
+const defaultPanningMouseButton: number[] | true = isMobileDevice ? true : [1];
+const defaultSelectionKeyCode: string | true = isMobileDevice ? 'Shift' : true;
+
 // @see https://developer.mozilla.org/en-US/docs/Web/API/UI_Events/Keyboard_event_key_values#whitespace_keys
 const panningKeyCode = ref<string[] | true>(isMobileDevice ? true : [' ', controlKeyCode]);
-const panningMouseButton = ref<number[] | true>(isMobileDevice ? true : [1]);
-const selectionKeyCode = ref<string | true | null>(isMobileDevice ? 'Shift' : true);
+const panningMouseButton = ref<number[] | true>(defaultPanningMouseButton);
+const selectionKeyCode = ref<string | true | null>(defaultSelectionKeyCode);
 const isInPanningMode = ref(false);
 
 function switchToPanningMode() {
@@ -342,16 +345,19 @@ function switchToPanningMode() {
 }
 
 function switchToSelectionMode() {
-	selectionKeyCode.value = true;
-	panningMouseButton.value = [1];
+	selectionKeyCode.value = defaultSelectionKeyCode;
+	panningMouseButton.value = defaultPanningMouseButton;
 	isInPanningMode.value = false;
 }
 
-onKeyDown(panningKeyCode.value, switchToPanningMode, {
-	dedupe: true,
-});
+// Mobile devices always pan on drag. Their panning key code is `true`, which matches every key.
+if (!isMobileDevice) {
+	onKeyDown(panningKeyCode.value, switchToPanningMode, {
+		dedupe: true,
+	});
 
-onKeyUp(panningKeyCode.value, switchToSelectionMode);
+	onKeyUp(panningKeyCode.value, switchToSelectionMode);
+}
 
 /**
  * Rename node key bindings

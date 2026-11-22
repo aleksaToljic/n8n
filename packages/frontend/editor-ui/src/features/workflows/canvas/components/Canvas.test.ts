@@ -1723,6 +1723,91 @@ describe('Canvas', () => {
 		});
 	});
 
+	describe.each([
+		{
+			device: 'iPad',
+			userAgent:
+				'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+		},
+		{
+			device: 'Android',
+			userAgent:
+				'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+		},
+	])('touch panning on a mobile device ($device)', ({ userAgent }) => {
+		const touchPanningMode = { panOnDrag: true, selectionKeyCode: 'Shift' };
+
+		beforeEach(() => {
+			vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(userAgent);
+		});
+
+		async function renderTouchCanvas() {
+			const rendered = renderComponent();
+			// A new VueFlow store has the same values as the touch panning mode.
+			// Only the mounted mobile canvas sets this one, so it proves which store the test reads.
+			await waitFor(() => expect(useVueFlow(canvasId).panActivationKeyCode.value).toBe(true));
+			expect(getPanningState()).toEqual(touchPanningMode);
+			return rendered;
+		}
+
+		it.each([
+			{ keyName: 'letter', key: 'a' },
+			{ keyName: 'Space', key: ' ' },
+		])('should keep touch panning after a $keyName key press', async ({ key }) => {
+			await renderTouchCanvas();
+
+			await fireEvent.keyDown(document, { key, view: window });
+			await fireEvent.keyUp(document, { key, view: window });
+			await nextTick();
+
+			expect(getPanningState()).toEqual(touchPanningMode);
+		});
+
+		it('should keep touch panning while a key is held down', async () => {
+			await renderTouchCanvas();
+
+			await fireEvent.keyDown(document, { key: 'a', view: window });
+			await nextTick();
+
+			expect(getPanningState()).toEqual(touchPanningMode);
+		});
+
+		it('should keep touch panning after the window loses focus', async () => {
+			await renderTouchCanvas();
+
+			await fireEvent.blur(window);
+			await nextTick();
+
+			expect(getPanningState()).toEqual(touchPanningMode);
+		});
+
+		it('should keep touch panning after typing in a text field', async () => {
+			const { container } = await renderTouchCanvas();
+			const input = document.createElement('input');
+			container.appendChild(input);
+
+			await fireEvent.keyDown(input, { key: 'a', view: window });
+			await fireEvent.keyUp(input, { key: 'a', view: window });
+			await nextTick();
+
+			expect(getPanningState()).toEqual(touchPanningMode);
+		});
+
+		it('should select while Shift is held on a hardware keyboard', async () => {
+			const { container } = await renderTouchCanvas();
+			const pane = container.querySelector('.vue-flow__pane');
+
+			await fireEvent.keyDown(document, { key: 'Shift', code: 'ShiftLeft', view: window });
+			await nextTick();
+			expect(getPanningState()).toEqual(touchPanningMode);
+			expect(pane).toHaveClass('selection');
+
+			await fireEvent.keyUp(document, { key: 'Shift', code: 'ShiftLeft', view: window });
+			await nextTick();
+			expect(pane).not.toHaveClass('selection');
+		});
+	});
+
 	describe('background', () => {
 		it('should render default background', () => {
 			const { container } = renderComponent();
